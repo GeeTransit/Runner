@@ -109,7 +109,7 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) > 2:
-        print("Usage: python runner.py <filename>")
+        print("Usage: python runner.py [filename=tasks.ini]")
         sys.exit(1)
     elif len(sys.argv) == 2:
         filename = sys.argv[1]
