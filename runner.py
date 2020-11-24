@@ -16,20 +16,20 @@ def open_parser(filename, *, write=True):
             parser.write(file)
 
 def get_tasks(filename):
-    tasks = {}
     with open_parser(filename, write=False) as parser:
+        tasks = {}
         for name in parser.sections():
             if name == "Config":
                 continue
             section = parser[name]
-            if section.setdefault("processed", "False") == "True":
+            if section.get("processed") == "True":
                 continue
             tasks[name] = {
                 "check": section["check"],
                 "run": section["run"],
-                "processed": section.getboolean("processed"),
+                "processed": section.get("processed") == "True",
             }
-    return tasks
+        return tasks
 
 def should_run_task(task):
     return eval(task["check"], {"now": datetime.datetime.now()})
