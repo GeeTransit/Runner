@@ -5,6 +5,8 @@ import subprocess
 import time
 import os
 
+parser = configparser.ConfigParser(interpolation=None)
+
 class TaskException(Exception):
     def __init__(self, key, original):
         super().__init__(key, original)
@@ -13,7 +15,6 @@ class TaskException(Exception):
 
 @contextlib.contextmanager
 def open_parser(filename, *, write=True):
-    parser = configparser.ConfigParser()
     parser.clear()
     parser.read(filename)
     yield parser
