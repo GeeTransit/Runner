@@ -22,20 +22,21 @@ def open_parser(filename, *, write=True):
         with open(filename, "w") as file:
             parser.write(file)
 
-def get_tasks_to_run(filename):
+def get_processable_tasks(filename):
     with open_parser(filename, write=False) as parser:
         tasks = {}
         for name in parser.sections():
             if name == "Config":
                 continue
             section = parser[name]
-            if section.get("processed") == "True":
-                continue
+            # Tasks with errors should be checked and have the value removed
             if section.get("error"):
                 continue
             tasks[name] = {
                 "check": section["check"],
                 "run": section["run"],
+                "processed": section.get("processed") == "True",
+                "successful": section.get("successful") == "True",
             }
         return tasks
 
@@ -56,10 +57,10 @@ def run_task(name, task):
     except Exception as e:
         raise TaskException("run", e) from None
 
-def set_task_processed(name, task, filename):
+def set_task_processed(name, task, processed, filename):
     with open_parser(filename) as parser:
         if name in parser:  # Make sure the task still exists
-            parser[name]["processed"] = str(True)
+            parser[name]["processed"] = str(processed)
 
 def set_task_successful(name, task, successful, filename):
     with open_parser(filename) as parser:
@@ -80,12 +81,22 @@ def get_sleep_interval(filename):
         return int(parser["Config"]["interval"])
 
 def run_one_cycle(filename):
-    for name, task in get_tasks_to_run(filename).items():
+    tasks = get_processable_tasks(filename)
+    for name, task in tasks.items():
+        task_processed = task["processed"]
+        task_successful = task["successful"]
         try:
-            if should_run_task(task):
-                successful = run_task(name, task)
-                set_task_processed(name, task, filename)
-                set_task_successful(name, task, successful, filename)
+            if task_processed and task_successful:
+                # Set it back to not processed when check is False
+                if not should_run_task(task):
+                    set_task_processed(name, task, False, filename)
+
+            if not task_processed:
+                if should_run_task(task):
+                    successful = run_task(name, task)
+                    set_task_processed(name, task, True, filename)
+                    set_task_successful(name, task, successful, filename)
+
         except TaskException as exception:
             set_task_errored(name, task, exception, filename)
 
