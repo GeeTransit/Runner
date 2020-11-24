@@ -55,10 +55,15 @@ def run_task(name, task):
     except Exception as e:
         raise TaskException("run", e) from None
 
-def set_task_processed(name, task, successful, filename):
+def set_task_processed(name, task, filename):
     with open_parser(filename) as parser:
         if name in parser:  # Make sure the task still exists
-            parser[name]["processed"] = str(successful)
+            parser[name]["processed"] = str(True)
+
+def set_task_successful(name, task, successful, filename):
+    with open_parser(filename) as parser:
+        if name in parser:
+            parser[name]["successful"] = str(successful)
 
 def set_task_errored(name, task, exception, filename):
     with open_parser(filename) as parser:
@@ -78,7 +83,8 @@ def run_one_cycle(filename):
         try:
             if should_run_task(task):
                 successful = run_task(name, task)
-                set_task_processed(name, task, successful, filename)
+                set_task_processed(name, task, filename)
+                set_task_successful(name, task, successful, filename)
         except TaskException as exception:
             set_task_errored(name, task, exception, filename)
 
