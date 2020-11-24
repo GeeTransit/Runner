@@ -41,7 +41,7 @@ def get_tasks_to_run(filename):
 
 def should_run_task(task):
     now = datetime.datetime.now()
-    names = "year month day hour minute".split()
+    names = "year month day hour minute second".split()
     variables = {name: getattr(now, name) for name in names}
     variables["now"] = now
     try:
