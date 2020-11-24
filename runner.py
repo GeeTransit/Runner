@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import configparser
 import contextlib
+import dataclasses
 import datetime
 import subprocess
 import time
@@ -7,106 +10,133 @@ import os
 
 parser = configparser.ConfigParser(interpolation=None)
 
+@dataclasses.dataclass
+class Config:
+    """Config file of tasks."""
+    filename: str
+
+    @contextlib.contextmanager
+    def open_parser(self, *, write=True):
+        # Uses global parser
+        parser.clear()
+        parser.read(self.filename)
+        yield parser
+        if write:
+            with open(self.filename, "w") as file:
+                parser.write(file)
+
+    def get_tasks(self):
+        with self.open_parser(write=False) as parser:
+            tasks = []
+            for name in parser.sections():
+                if name == "Config":
+                    continue
+                section = parser[name]
+                tasks.append(Task(
+                    name,
+                    self,
+                    section["check"],
+                    section["run"],
+                    section.get("processed") == "True",
+                    section.get("successful") == "True",
+                    section.get("error", None),
+                ))
+            return tasks
+
+    def run_one_cycle(self):
+        for task in self.get_tasks():
+            # Tasks with errors should be checked and have the value removed
+            if task.error:
+                continue
+
+            try:
+                if task.processed and task.successful:
+                    # Set it back to not processed when check is False
+                    if not task.should_run():
+                        task.set_processed(False)
+
+                if not task.processed:
+                    should_run = task.should_run()
+                    # Note whether the task was processed or not so that the
+                    # user can know if the program is still running.
+                    task.set_processed(should_run)
+                    if should_run:
+                        successful = task.run_command()
+                        task.set_successful(successful)
+
+            # Only catch errors from the user
+            except TaskException as exception:
+                task.set_error(exception)
+
+    def get_sleep_interval(self):
+        # Ensure interval exists in the config file
+        with self.open_parser() as parser:
+            parser.setdefault("Config", {})
+            parser["Config"].setdefault("interval", str(10))
+            return int(parser["Config"]["interval"])
+
+@dataclasses.dataclass
+class Task:
+    """Task info."""
+    name: str
+    config: Config
+    check: str
+    run: str
+    processed: bool
+    successful: bool
+    error: Optional[str]
+
+    def should_run(self):
+        now = datetime.datetime.now()
+        names = "year month day hour minute second".split()
+        variables = {name: getattr(now, name) for name in names}
+        variables["now"] = now
+        try:
+            return eval(self.check, variables)
+        except Exception as e:
+            raise TaskException("check", e) from None
+
+    def run_command(self):
+        print(f"[{self.name}] {self.run}")
+        try:
+            return os.system(self.run) == 0
+        except Exception as e:
+            raise TaskException("run", e) from None
+
+    def set_processed(self, processed):
+        with self.config.open_parser() as parser:
+            if self.name in parser:  # Make sure the task still exists
+                parser[self.name]["processed"] = str(processed)
+
+    def set_successful(self, successful):
+        with self.config.open_parser() as parser:
+            if self.name in parser:
+                parser[self.name]["successful"] = str(successful)
+
+    def set_error(self, error):
+        if isinstance(error, str):
+            pass  # No need to reformat
+        elif isinstance(error, TaskException):
+            key, original = error.key, error.original
+            error = f"{key}: {original!r}"
+        else:
+            name = type(error).__name__
+            message = ", ".join(map(repr, error.args))
+            error = f"{name}: {message}"
+        with self.config.open_parser() as parser:
+            if self.name in parser:
+                parser[self.name]["error"] = str(error)
+
 class TaskException(Exception):
     def __init__(self, key, original):
         super().__init__(key, original)
         self.key = key
         self.original = original
 
-@contextlib.contextmanager
-def open_parser(filename, *, write=True):
-    parser.clear()
-    parser.read(filename)
-    yield parser
-    if write:
-        with open(filename, "w") as file:
-            parser.write(file)
-
-def get_processable_tasks(filename):
-    with open_parser(filename, write=False) as parser:
-        tasks = {}
-        for name in parser.sections():
-            if name == "Config":
-                continue
-            section = parser[name]
-            # Tasks with errors should be checked and have the value removed
-            if section.get("error"):
-                continue
-            tasks[name] = {
-                "check": section["check"],
-                "run": section["run"],
-                "processed": section.get("processed") == "True",
-                "successful": section.get("successful") == "True",
-            }
-        return tasks
-
-def should_run_task(task):
-    now = datetime.datetime.now()
-    names = "year month day hour minute second".split()
-    variables = {name: getattr(now, name) for name in names}
-    variables["now"] = now
-    try:
-        return eval(task["check"], variables)
-    except Exception as e:
-        raise TaskException("check", e) from None
-
-def run_task(name, task):
-    print(f"[{name}] {task['run']}")
-    try:
-        return os.system(task["run"]) == 0
-    except Exception as e:
-        raise TaskException("run", e) from None
-
-def set_task_processed(name, task, processed, filename):
-    with open_parser(filename) as parser:
-        if name in parser:  # Make sure the task still exists
-            parser[name]["processed"] = str(processed)
-
-def set_task_successful(name, task, successful, filename):
-    with open_parser(filename) as parser:
-        if name in parser:
-            parser[name]["successful"] = str(successful)
-
-def set_task_errored(name, task, exception, filename):
-    with open_parser(filename) as parser:
-        if name in parser:
-            key, original = exception.key, exception.original
-            parser[name]["error"] = f"{key}: {original!r}"
-
-def get_sleep_interval(filename):
-    # Ensure interval exists in the config file
-    with open_parser(filename) as parser:
-        parser.setdefault("Config", {})
-        parser["Config"].setdefault("interval", str(10))
-        return int(parser["Config"]["interval"])
-
-def run_one_cycle(filename):
-    tasks = get_processable_tasks(filename)
-    for name, task in tasks.items():
-        task_processed = task["processed"]
-        task_successful = task["successful"]
-        try:
-            if task_processed and task_successful:
-                # Set it back to not processed when check is False
-                if not should_run_task(task):
-                    set_task_processed(name, task, False, filename)
-
-            if not task_processed:
-                should_run = should_run_task(task)
-                # Note that the task wasn't processed so that the user can know
-                # that the program is still running.
-                set_task_processed(name, task, should_run, filename)
-                if should_run:
-                    successful = run_task(name, task)
-                    set_task_successful(name, task, successful, filename)
-
-        except TaskException as exception:
-            set_task_errored(name, task, exception, filename)
-
-def main(filename="tasks.ini"):
+def main(config):
     while True:
-        run_one_cycle(filename)
-        time.sleep(get_sleep_interval(filename))
+        config.run_one_cycle()
+        time.sleep(config.get_sleep_interval())
 
 if __name__ == "__main__":
     import sys
@@ -120,8 +150,9 @@ if __name__ == "__main__":
         filename = "tasks.ini"
 
     print(f"Starting runner.py: {filename}")
+    config = Config(filename)
     try:
-        main(filename)
+        main(config)
     except KeyboardInterrupt:
         pass
     except BaseException:
