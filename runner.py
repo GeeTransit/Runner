@@ -92,9 +92,12 @@ def run_one_cycle(filename):
                     set_task_processed(name, task, False, filename)
 
             if not task_processed:
-                if should_run_task(task):
+                should_run = should_run_task(task)
+                # Note that the task wasn't processed so that the user can know
+                # that the program is still running.
+                set_task_processed(name, task, should_run, filename)
+                if should_run:
                     successful = run_task(name, task)
-                    set_task_processed(name, task, True, filename)
                     set_task_successful(name, task, successful, filename)
 
         except TaskException as exception:
