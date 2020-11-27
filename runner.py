@@ -22,6 +22,7 @@ class Config:
         parser.read(self.filename)
         yield parser
         if write:
+            self._set_last_updated(parser)
             with open(self.filename, "w") as file:
                 parser.write(file)
 
@@ -74,6 +75,13 @@ class Config:
             parser.setdefault("Config", {})
             parser["Config"].setdefault("interval", str(10))
             return int(parser["Config"]["interval"])
+
+    def _set_last_updated(self, parser):
+        now = datetime.datetime.now()
+        last_updated = now.strftime("%m/%d/%Y %H:%M:%S")
+        parser.setdefault("Config", {})
+        parser["Config"]["last-updated"] = last_updated
+        return last_updated
 
 @dataclasses.dataclass
 class Task:
