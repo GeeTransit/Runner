@@ -179,5 +179,9 @@ if __name__ == "__main__":
     except BaseException:
         import traceback
         traceback.print_exc()
+        sys.exit(4)
     finally:
-        input("Press enter to close the program...")
+        try:
+            input("Press enter to close the program...")
+        except BaseException:
+            pass
