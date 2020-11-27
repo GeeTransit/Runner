@@ -32,15 +32,14 @@ class Config:
             for name in parser.sections():
                 if name == "Config":
                     continue
-                section = parser[name]
                 tasks.append(Task(
                     name,
                     self,
-                    section["check"],
-                    section["run"],
-                    section.get("processed") == "True",
-                    section.get("successful") == "True",
-                    section.get("error", None),
+                    parser.get(name, "check"),
+                    parser.get(name, "run"),
+                    parser.getboolean(name, "processed", fallback=None),
+                    parser.getboolean(name, "successful", fallback=None),
+                    parser.get(name, "error", fallback=None),
                 ))
             return tasks
 
@@ -90,8 +89,8 @@ class Task:
     config: Config
     check: str
     run: str
-    processed: bool
-    successful: bool
+    processed: Optional[bool]
+    successful: Optional[bool]
     error: Optional[str]
 
     def should_run(self):
@@ -112,28 +111,42 @@ class Task:
             raise TaskException("run", e) from None
 
     def set_processed(self, processed):
-        with self.config.open_parser() as parser:
-            if self.name in parser:  # Make sure the task still exists
-                parser[self.name]["processed"] = str(processed)
+        self.processed = processed
+        self.update(self.config)
 
     def set_successful(self, successful):
+        self.successful = successful
+        self.update(self.config)
         with self.config.open_parser() as parser:
             if self.name in parser:
                 parser[self.name]["successful"] = str(successful)
 
     def set_error(self, error):
+        self.successful = self.format_error(error)
+        self.update(self.config)
+
+    @staticmethod
+    def format_error(error):
         if isinstance(error, str):
-            pass  # No need to reformat
-        elif isinstance(error, TaskException):
-            key, original = error.key, error.original
-            error = f"{key}: {original!r}"
-        else:
-            name = type(error).__name__
-            message = ", ".join(map(repr, error.args))
-            error = f"{name}: {message}"
-        with self.config.open_parser() as parser:
-            if self.name in parser:
-                parser[self.name]["error"] = str(error)
+            return error  # No need to reformat
+        assert isinstance(error, BaseException)
+        if isinstance(error, TaskException):
+            return f"{error.key}: {error.original!r}"
+        return f"{type(error).__name__}: {', '.join(map(repr, error.args))}"
+
+    def update(self, config, force=False):
+        with config.open_parser(write=True) as parser:
+            if force or self.name in parser:
+                if not parser.has_section(self.name):
+                    parser.add_section(self.name)
+                parser.set(self.name, "check", self.check)
+                parser.set(self.name, "run", self.run)
+                if self.processed is not None:
+                    parser.set(self.name, "processed", str(self.processed))
+                if self.successful is not None:
+                    parser.set(self.name, "successful", str(self.successful))
+                if self.error:
+                    parser.set(self.name, "error", self.error)
 
 class TaskException(Exception):
     def __init__(self, key, original):
